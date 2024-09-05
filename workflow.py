@@ -7,8 +7,6 @@ from littlehorse.model import VariableMutationType
 
 from littlehorse.workflow import Workflow, WorkflowThread, SpawnedThreads
 
-from shopping import create_order, check_stock, collect_payment, send_email, change_order_status, schedule_delivery, assign_courier, update_shipping_details, complete_order
-
 logging.basicConfig(level=logging.INFO)
 
 
