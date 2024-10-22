@@ -5,7 +5,7 @@ from littlehorse.config import LHConfig
 from littlehorse.model.common_enums_pb2 import VariableType
 from littlehorse.model import VariableMutationType
 
-from littlehorse.workflow import Workflow, WorkflowThread, SpawnedThreads
+from littlehorse.workflow import Workflow, WorkflowThread, SpawnedThreads, Comparator
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,6 +25,26 @@ def get_workflow() -> Workflow:
         wf.execute("update-shipping-details")
     
 
+    def request_stock(wf:WorkflowThread) -> None:
+        check_stock_output = wf.assign_user_task("check-stock", user_group="warehouse")
+        is_available = wf.add_variable("is-available", VariableType.BOOL)
+        wf.mutate(is_available, VariableMutationType.ASSIGN, check_stock_output.with_json_path("$.InventoryAvailability"))
+        
+        def fail(wf: WorkflowThread) -> None:
+            wf.fail("no-inventory", "No Inventory")
+        
+        wf.do_if(wf.condition(is_available, Comparator.EQUALS, False), fail)
+    
+
+    def wait_for_payment(wf:WorkflowThread) -> None:
+        check_payment_output = wf.assign_user_task("wait-for-payment", user_group="customer service")
+        confirmation_number = wf.add_variable("confirmation-number", VariableType.STR)
+        wf.mutate(confirmation_number, VariableMutationType.ASSIGN, check_payment_output.with_json_path("$.ConfirmationNumber"))
+
+        def fail(wf: WorkflowThread) -> None:
+            wf.fail("not-enough-money", "Not enough balance")
+        
+        wf.do_if(wf.condition(confirmation_number, Comparator.EQUALS, None), fail)
 
     def shopping(wf: WorkflowThread) -> None:
         # Define an input variable
@@ -34,8 +54,12 @@ def get_workflow() -> Workflow:
         wf.mutate(items, VariableMutationType.ASSIGN, order.with_json_path("$.items"))
         wf.mutate(customer, VariableMutationType.ASSIGN, order.with_json_path("$.customer.id"))
         wf.execute("create-order", order)
-        wf.execute("check-stock", items)
-        wf.execute("collect-payment", customer, order.with_json_path("$.total_cost")) 
+        stocknode = wf.execute("check-stock", items)
+        wf.handle_exception(stocknode, request_stock, "out-of-stock")
+        
+        paymentnode = wf.execute("collect-payment", customer, order.with_json_path("$.total_cost")) 
+        wf.handle_exception(paymentnode, wait_for_payment, "payment-fail")
+        
         send_email_thread = wf.spawn_thread(send_email, "send-email")
         change_order_status_thread = wf.spawn_thread(change_order_status, "change-order-status")
         schedule_delivery_thread = wf.spawn_thread(schedule_delivery, "schedule-delivery")
@@ -59,4 +83,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
