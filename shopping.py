@@ -5,6 +5,10 @@ from typing import Any
 import littlehorse
 from littlehorse.config import LHConfig
 from littlehorse.worker import LHTaskWorker
+from littlehorse.model.common_enums_pb2 import VariableType
+
+from littlehorse.model import PutUserTaskDefRequest, UserTaskField
+from littlehorse.exceptions import LHTaskException
 
 logging.basicConfig(level=logging.INFO)
 
@@ -14,9 +18,14 @@ class ShoppingService:
         print(order['total_cost'])
 
     async def check_stock(self, order_items: list[Any]) -> None:
-        print(order_items)
+        for item in order_items:
+            print(item['quantity'])
+            if item['quantity'] > 500:
+                raise LHTaskException('out-of-stock', "not enough inventory")
 
     async def collect_payment(self, customer: str, payment: float) -> None:
+        if payment > 100:
+            raise LHTaskException('payment-failure', 'need more money')
         print(payment)
 
     async def send_email(self) -> None:
@@ -37,6 +46,39 @@ class ShoppingService:
     async def complete_order(self, order_id: str) -> None:
         print(order_id)
 
+    async def get_user_task_def(self):
+        return PutUserTaskDefRequest(
+        name="check-stock",
+        fields=[
+            UserTaskField(
+                name="InventoryAvailability",
+                description="Is inventory avaiable?",
+                display_name="Available?",
+                required=True,
+                type=VariableType.BOOL
+            )
+        ]
+    )
+
+    async def notify_customer(self) -> None:
+        print("notify_customer")
+
+    def get_user_task_payment(self):
+        return PutUserTaskDefRequest(
+            name="wait-for-payment",
+            fields=[
+                UserTaskField(
+                    name="ConfirmationNumber",
+                    description="Is there enough money?",
+                    display_name="Money balance",
+                    required=True,
+                    type=VariableType.BOOL
+                )
+            ]
+        )
+    
+    
+
 async def main() -> None:
     logging.info("Starting Task Worker!")
     
@@ -51,8 +93,8 @@ async def main() -> None:
     
 
     collect_payment_worker = LHTaskWorker(service.collect_payment, "collect-payment", config)
-    collect_payment_worker. register_task_def()
-     
+    collect_payment_worker.register_task_def()
+    
 
     send_email_worker = LHTaskWorker(service.send_email, "send-email", config)
     send_email_worker.register_task_def()
@@ -77,6 +119,12 @@ async def main() -> None:
     complete_order_worker = LHTaskWorker(service.complete_order, "complete-order", config)
     complete_order_worker.register_task_def()
 
+    client = config.stub()
+    put_user_task = service.get_user_task_def()
+    client.PutUserTaskDef(put_user_task)
+
+    client.PutUserTaskDef(service.get_user_task_payment())
+
     tasks = [
         create_order_worker,
         check_stock_worker,
@@ -94,4 +142,3 @@ async def main() -> None:
 
 if __name__ == '__main__':
     asyncio.run(main())
-
